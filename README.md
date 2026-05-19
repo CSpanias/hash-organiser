@@ -17,7 +17,7 @@ It assumes that the ` -just-dc-ntlm` and `-user-status` flags are used (see [Usa
 
 ## Requirements
 
-It uses standard GNU utilities (`grep`, `awk`, `cut`, and `sort`); the only dependency is [`jq`](https://github.com/jqlang/jq).
+The script is based on standard GNU utilities (`grep`, `awk`, `cut`, and `sort`), the only dependency is [`jq`](https://github.com/jqlang/jq).
 
 ## Usage
 

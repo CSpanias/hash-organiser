@@ -59,7 +59,7 @@ $ ./hash-organiser.sh -i puppy.htb.ntds.expanded -b bh-data/20260517110753_puppy
 
 [*] Applying optional filtering...
 [!] Filtered accounts (mollysec): 2
-    → hash-organiser/filtered-accounts.txt
+    → hash-organiser/testing-accounts.txt
 [+] Clean user dataset
     → hash-organiser/ntds-users-clean.txt
 

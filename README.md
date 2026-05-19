@@ -1,8 +1,8 @@
 # Hash Organiser
 
-Hash Organiser is a minimal bash tool for processing NTDS dumps during password audits. Converts raw [`secretsdump`](https://github.com/fortra/impacket/blob/master/examples/secretsdump.py) output into structured datasets suitable for cracking and analysis. 
+Hash Organiser is a minimal bash tool for processing NTDS dumps during password audits. Converts raw [`secretsdump`](https://github.com/fortra/impacket/blob/master/examples/secretsdump.py) output into structured datasets suitable for cracking and analysis. It assumes that the ` -just-dc-ntlm` and `-user-status` flags are used (see [Usage](#usage)).
 
-It assumes that the ` -just-dc-ntlm` and `-user-status` flags are used (see [Usage](#usage)).
+Vibe-coded with M365 Copilot (GTP-5).
 
 ## Features
 

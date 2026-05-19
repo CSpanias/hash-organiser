@@ -24,31 +24,34 @@ NC="\033[0m"
 # --- DEFAULTS ---
 OUTPUT_DIR="hash-organiser"
 FILTER_PATTERN=""
+POTFILE=""
 
 # --- HELP MENU ---
 usage() {
     echo "Hash Organiser v$VERSION"
     echo ""
     echo "Usage:"
-    echo "  $0 -i <ntds_file> -b <bh_users_json> [-o output_dir] [-f filter_pattern]"
+    echo "  $0 -i <ntds_file> -b <bh_users_json> [-o output_dir] [-f filter_pattern] [-p potfile]"
     echo ""
     echo "Options:"
     echo "  -i    NTDS dump file"
     echo "  -b    BloodHound users JSON file"
     echo "  -o    Output directory (default: hash-organiser)"
-    echo "  -f    Pattern to filter out (e.g. company/test accounts)"
+    echo "  -f    Pattern to filter out (e.g. test/company accounts)"
+    echo "  -p    Hashcat potfile (optional, enables mapping)"
     echo "  -h    Show this help message"
     echo ""
     exit 1
 }
 
 # --- PARSE FLAGS ---
-while getopts "i:b:o:f:h" opt; do
+while getopts "i:b:o:f:p:h" opt; do
     case $opt in
         i) NTDS_FILE="$OPTARG" ;;
         b) BH_JSON="$OPTARG" ;;
         o) OUTPUT_DIR="$OPTARG" ;;
         f) FILTER_PATTERN="$OPTARG" ;;
+        p) POTFILE="$OPTARG" ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -69,7 +72,12 @@ if [ ! -f "$BH_JSON" ]; then
     exit 1
 fi
 
-# --- DEPENDENCY CHECKS ---
+if [ -n "$POTFILE" ] && [ ! -f "$POTFILE" ]; then
+    echo -e "${RED}[!] Potfile not found${NC}"
+    exit 1
+fi
+
+# --- DEPENDENCY CHECK ---
 command -v jq >/dev/null 2>&1 || { echo -e "${RED}[!] jq is required but not installed${NC}"; exit 1; }
 
 # --- CREATE OUTPUT DIR ---
@@ -80,11 +88,12 @@ ENABLED_FILE="$OUTPUT_DIR/ntds-enabled.txt"
 DISABLED_FILE="$OUTPUT_DIR/ntds-disabled.txt"
 MACHINE_FILE="$OUTPUT_DIR/ntds-machine.txt"
 CLEAN_USER_FILE="$OUTPUT_DIR/ntds-users-clean.txt"
-FILTERED_FILE="$OUTPUT_DIR/filtered-accounts.txt"
+FILTERED_FILE="$OUTPUT_DIR/testing-accounts.txt"
 HASH_FILE="$OUTPUT_DIR/ntlm-hashes.txt"
-LM_PRESENT_FILE="$OUTPUT_DIR/lm-present.txt"
+LM_PRESENT_FILE="$OUTPUT_DIR/lm-hashes.txt"
 ADMIN_USERS_FILE="$OUTPUT_DIR/admin-users.txt"
 ADMIN_HASHES_FILE="$OUTPUT_DIR/admin-hashes.txt"
+MAPPED_FILE="$OUTPUT_DIR/mapped-passwords.txt"
 
 echo -e "${BLUE}[*] Hash Organiser v$VERSION starting...${NC}"
 echo -e "${GREEN}[+] Output directory:${NC} $OUTPUT_DIR"
@@ -123,7 +132,7 @@ echo -e "    → $MACHINE_FILE"
 echo -e "${GREEN}[+] User accounts:${NC} $COUNT_USERS"
 
 # ---------------------------------------------------------------------------
-# STEP 3: OPTIONAL FILTERING (USER-PROVIDED PATTERN)
+# STEP 3: OPTIONAL FILTERING
 # ---------------------------------------------------------------------------
 echo -e "\n${BLUE}[*] Applying optional filtering...${NC}"
 
@@ -148,7 +157,7 @@ echo -e "${GREEN}[+] Clean user dataset${NC}"
 echo -e "    → $CLEAN_USER_FILE"
 
 # ---------------------------------------------------------------------------
-# STEP 4: HASH STATISTICS (CLEAN DATASET)
+# STEP 4: HASH STATISTICS
 # ---------------------------------------------------------------------------
 echo -e "\n${BLUE}[*] Calculating NTLM hash statistics...${NC}"
 
@@ -185,13 +194,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# STEP 7: BLOODHOUND PRIVILEGED USERS
+# STEP 7: PRIVILEGED USERS (FILTERED)
 # ---------------------------------------------------------------------------
 echo -e "\n${BLUE}[*] Extracting privileged accounts (BloodHound)...${NC}"
 
 jq -r '.data[]
-    | select(.Properties.admincount == true and .Properties.enabled == true)
-    | .Properties.samaccountname' "$BH_JSON" > "$ADMIN_USERS_FILE"
+  | select(.Properties.admincount == true and .Properties.enabled == true)
+  | .Properties.samaccountname' "$BH_JSON" > "$ADMIN_USERS_FILE.tmp"
+
+if [ -n "$FILTER_PATTERN" ]; then
+    grep -vi "$FILTER_PATTERN" "$ADMIN_USERS_FILE.tmp" > "$ADMIN_USERS_FILE"
+else
+    mv "$ADMIN_USERS_FILE.tmp" "$ADMIN_USERS_FILE"
+fi
+
+rm -f "$ADMIN_USERS_FILE.tmp"
 
 ADMIN_COUNT=$(wc -l < "$ADMIN_USERS_FILE")
 
@@ -209,6 +226,23 @@ ADMIN_HASH_COUNT=$(wc -l < "$ADMIN_HASHES_FILE")
 
 echo -e "${GREEN}[+] Privileged hashes identified:${NC} $ADMIN_HASH_COUNT"
 echo -e "    → $ADMIN_HASHES_FILE"
+
+# ---------------------------------------------------------------------------
+# STEP 9: POTFILE MAPPING
+# ---------------------------------------------------------------------------
+if [ -n "$POTFILE" ]; then
+    echo -e "\n${BLUE}[*] Mapping cracked hashes using potfile...${NC}"
+
+    awk -F':' '
+    NR==FNR {c[$1]=$2; next}
+    ($4 in c) {print $1 ":" c[$4]}
+    ' "$POTFILE" "$CLEAN_USER_FILE" > "$MAPPED_FILE"
+
+    MAPPED_COUNT=$(wc -l < "$MAPPED_FILE")
+
+    echo -e "${GREEN}[+] Cracked user credentials:${NC} $MAPPED_COUNT"
+    echo -e "    → $MAPPED_FILE"
+fi
 
 # ---------------------------------------------------------------------------
 # FINAL

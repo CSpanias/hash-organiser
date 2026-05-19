@@ -37,3 +37,52 @@ unzip 20260517110753_puppy-htb_rusthound-ce.zip -d ./bh-data/
 # Example
 ./hash-organiser.sh -i puppy.htb.ntds -b ./bh-data/20260517110753_puppy-htb_users.json [-o output_dir] [-f pattern] [-p potfile]
 ```
+
+The expected output should look like this:
+
+```bash
+$ ./hash-organiser.sh -i puppy.htb.ntds.expanded -b bh-data/20260517110753_puppy-htb_users.json -f 'mollysec'
+[*] Hash Organiser v1.0 starting...
+[+] Output directory: hash-organiser
+
+[*] Analysing account status...
+[+] Total accounts: 26
+[+] Enabled accounts: 22
+    → hash-organiser/ntds-enabled.txt
+[+] Disabled accounts: 3
+    → hash-organiser/ntds-disabled.txt
+
+[*] Splitting machine and user accounts...
+[+] Machine accounts: 2
+    → hash-organiser/ntds-machine.txt
+[+] User accounts: 20
+
+[*] Applying optional filtering...
+[!] Filtered accounts (mollysec): 2
+    → hash-organiser/filtered-accounts.txt
+[+] Clean user dataset
+    → hash-organiser/ntds-users-clean.txt
+
+[*] Calculating NTLM hash statistics...
+[+] Total NTLM hashes: 18
+[+] Unique NTLM hashes: 10
+
+[*] Extracting NTLM hashes...
+[+] Deduplicated hash file
+    → hash-organiser/ntlm-hashes.txt
+
+[*] Checking for LM hashes...
+[!] LM hashes detected: 3
+    → hash-organiser/lm-hashes.txt
+
+[*] Extracting privileged accounts (BloodHound)...
+[+] Enabled privileged accounts: 2
+    → hash-organiser/admin-users.txt
+
+[*] Mapping privileged users to hashes...
+[+] Privileged hashes identified: 2
+    → hash-organiser/admin-hashes.txt
+
+[✔] Hash Organiser completed successfully
+[+] Results stored in: hash-organiser
+```

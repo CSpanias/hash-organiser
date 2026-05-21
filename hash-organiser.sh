@@ -4,10 +4,6 @@
 # Hash Organiser v1.0
 # Author: Charalampos Spanias (mollysec)
 # Date: 17 May 2026
-#
-# Description:
-#   Minimal NTDS post-processing tool for password auditing workflows.
-#   Produces clean datasets for cracking, mapping, and analysis.
 ###############################################################################
 
 set -e
@@ -26,29 +22,30 @@ OUTPUT_DIR="hash-organiser"
 FILTER_PATTERN=""
 POTFILE=""
 
-# --- HELP MENU ---
+# --- HELP ---
 usage() {
     echo "Hash Organiser v$VERSION"
     echo ""
     echo "Usage:"
-    echo "  $0 -i <ntds_file> -b <bh_users_json> [-o output_dir] [-f filter_pattern] [-p potfile]"
+    echo "  $0 -i <ntds_file> -b <bh_users_json> -g <bh_groups_json> [-o dir] [-f pattern] [-p potfile]"
     echo ""
     echo "Options:"
-    echo "  -i    NTDS dump file"
-    echo "  -b    BloodHound users JSON file"
-    echo "  -o    Output directory (default: hash-organiser)"
-    echo "  -f    Pattern to filter out (e.g. test/company accounts)"
-    echo "  -p    Hashcat potfile (optional, enables mapping)"
-    echo "  -h    Show this help message"
+    echo "  -i NTDS dump file"
+    echo "  -b BloodHound users.json"
+    echo "  -g BloodHound groups.json"
+    echo "  -o Output directory"
+    echo "  -f Filter pattern (test/company accounts)"
+    echo "  -p Hashcat potfile"
     echo ""
     exit 1
 }
 
-# --- PARSE FLAGS ---
-while getopts "i:b:o:f:p:h" opt; do
+# --- PARSE ---
+while getopts "i:b:g:o:f:p:h" opt; do
     case $opt in
         i) NTDS_FILE="$OPTARG" ;;
-        b) BH_JSON="$OPTARG" ;;
+        b) BH_USERS="$OPTARG" ;;
+        g) BH_GROUPS="$OPTARG" ;;
         o) OUTPUT_DIR="$OPTARG" ;;
         f) FILTER_PATTERN="$OPTARG" ;;
         p) POTFILE="$OPTARG" ;;
@@ -58,195 +55,110 @@ while getopts "i:b:o:f:p:h" opt; do
 done
 
 # --- VALIDATION ---
-if [ -z "$NTDS_FILE" ] || [ -z "$BH_JSON" ]; then
-    usage
-fi
+[ -z "$NTDS_FILE" ] && usage
+[ -z "$BH_USERS" ] && usage
+[ -z "$BH_GROUPS" ] && usage
 
-if [ ! -f "$NTDS_FILE" ]; then
-    echo -e "${RED}[!] NTDS file not found${NC}"
-    exit 1
-fi
+[ ! -f "$NTDS_FILE" ] && echo "[!] NTDS missing" && exit 1
+[ ! -f "$BH_USERS" ] && echo "[!] users.json missing" && exit 1
+[ ! -f "$BH_GROUPS" ] && echo "[!] groups.json missing" && exit 1
+[ -n "$POTFILE" ] && [ ! -f "$POTFILE" ] && echo "[!] potfile missing" && exit 1
 
-if [ ! -f "$BH_JSON" ]; then
-    echo -e "${RED}[!] BloodHound JSON file not found${NC}"
-    exit 1
-fi
+command -v jq >/dev/null || { echo "[!] jq required"; exit 1; }
 
-if [ -n "$POTFILE" ] && [ ! -f "$POTFILE" ]; then
-    echo -e "${RED}[!] Potfile not found${NC}"
-    exit 1
-fi
-
-# --- DEPENDENCY CHECK ---
-command -v jq >/dev/null 2>&1 || { echo -e "${RED}[!] jq is required but not installed${NC}"; exit 1; }
-
-# --- CREATE OUTPUT DIR ---
 mkdir -p "$OUTPUT_DIR"
 
 # --- FILES ---
-ENABLED_FILE="$OUTPUT_DIR/ntds-enabled.txt"
-DISABLED_FILE="$OUTPUT_DIR/ntds-disabled.txt"
-MACHINE_FILE="$OUTPUT_DIR/ntds-machine.txt"
-CLEAN_USER_FILE="$OUTPUT_DIR/ntds-users-clean.txt"
-FILTERED_FILE="$OUTPUT_DIR/testing-accounts.txt"
-HASH_FILE="$OUTPUT_DIR/ntlm-hashes.txt"
-LM_PRESENT_FILE="$OUTPUT_DIR/lm-hashes.txt"
-ADMIN_USERS_FILE="$OUTPUT_DIR/admin-users.txt"
-ADMIN_HASHES_FILE="$OUTPUT_DIR/admin-hashes.txt"
-MAPPED_FILE="$OUTPUT_DIR/mapped-passwords.txt"
+ENABLED="$OUTPUT_DIR/ntds-enabled.txt"
+DISABLED="$OUTPUT_DIR/ntds-disabled.txt"
+MACHINE="$OUTPUT_DIR/ntds-machine.txt"
+USERS="$OUTPUT_DIR/ntds-users-clean.txt"
+FILTERED="$OUTPUT_DIR/testing-accounts.txt"
+HASHES="$OUTPUT_DIR/ntlm-hashes.txt"
+LM="$OUTPUT_DIR/lm-hashes.txt"
+USERNAMES="$OUTPUT_DIR/usernames.txt"
+ADMINS="$OUTPUT_DIR/admin-users.txt"
+ADMIN_HASHES="$OUTPUT_DIR/admin-hashes.txt"
+DA_USERS="$OUTPUT_DIR/domain-admins.txt"
+DA_HASHES="$OUTPUT_DIR/domain-admin-hashes.txt"
+MAPPED="$OUTPUT_DIR/mapped-passwords.txt"
 
-echo -e "${BLUE}[*] Hash Organiser v$VERSION starting...${NC}"
-echo -e "${GREEN}[+] Output directory:${NC} $OUTPUT_DIR"
-
-# ---------------------------------------------------------------------------
-# STEP 1: ACCOUNT STATUS
-# ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Analysing account status...${NC}"
-
-TOTAL_COUNT=$(grep -c ":" "$NTDS_FILE")
-ENABLED_COUNT=$(grep -c "(status=Enabled)" "$NTDS_FILE")
-DISABLED_COUNT=$(grep -c "(status=Disabled)" "$NTDS_FILE")
-
-echo -e "${GREEN}[+] Total accounts:${NC} $TOTAL_COUNT"
-echo -e "${GREEN}[+] Enabled accounts:${NC} $ENABLED_COUNT"
-echo -e "    → $ENABLED_FILE"
-echo -e "${GREEN}[+] Disabled accounts:${NC} $DISABLED_COUNT"
-echo -e "    → $DISABLED_FILE"
-
-grep "(status=Enabled)" "$NTDS_FILE" | awk '{print $1}' > "$ENABLED_FILE"
-grep "(status=Disabled)" "$NTDS_FILE" | awk '{print $1}' > "$DISABLED_FILE"
+echo "[*] Starting Hash Organiser"
 
 # ---------------------------------------------------------------------------
-# STEP 2: SPLIT MACHINE / USER
+# STEP 1: ENABLED/DISABLED
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Splitting machine and user accounts...${NC}"
-
-awk -F ':' '$1 ~ /\$$/' "$ENABLED_FILE" > "$MACHINE_FILE"
-awk -F ':' '$1 !~ /\$$/' "$ENABLED_FILE" > "$CLEAN_USER_FILE.tmp"
-
-COUNT_MACHINES=$(wc -l < "$MACHINE_FILE")
-COUNT_USERS=$(wc -l < "$CLEAN_USER_FILE.tmp")
-
-echo -e "${GREEN}[+] Machine accounts:${NC} $COUNT_MACHINES"
-echo -e "    → $MACHINE_FILE"
-echo -e "${GREEN}[+] User accounts:${NC} $COUNT_USERS"
+grep "(status=Enabled)" "$NTDS_FILE" | awk '{print $1}' > "$ENABLED"
+grep "(status=Disabled)" "$NTDS_FILE" | awk '{print $1}' > "$DISABLED"
 
 # ---------------------------------------------------------------------------
-# STEP 3: OPTIONAL FILTERING
+# STEP 2: SPLIT
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Applying optional filtering...${NC}"
+awk -F: '$1 ~ /\$$/' "$ENABLED" > "$MACHINE"
+awk -F: '$1 !~ /\$$/' "$ENABLED" > "$USERS.tmp"
 
+# ---------------------------------------------------------------------------
+# STEP 3: FILTER
+# ---------------------------------------------------------------------------
 if [ -n "$FILTER_PATTERN" ]; then
-    grep -i "$FILTER_PATTERN" "$CLEAN_USER_FILE.tmp" > "$FILTERED_FILE" || true
-    grep -vi "$FILTER_PATTERN" "$CLEAN_USER_FILE.tmp" > "$CLEAN_USER_FILE"
-
-    FILTER_COUNT=$(wc -l < "$FILTERED_FILE" || echo 0)
-
-    if [ "$FILTER_COUNT" -gt 0 ]; then
-        echo -e "${YELLOW}[!] Filtered accounts (${FILTER_PATTERN}):${NC} $FILTER_COUNT"
-        echo -e "    → $FILTERED_FILE"
-    fi
+    grep -i "$FILTER_PATTERN" "$USERS.tmp" > "$FILTERED" || true
+    grep -vi "$FILTER_PATTERN" "$USERS.tmp" > "$USERS"
 else
-    mv "$CLEAN_USER_FILE.tmp" "$CLEAN_USER_FILE"
-    echo -e "${GREEN}[+] No filtering applied${NC}"
+    mv "$USERS.tmp" "$USERS"
 fi
-
-rm -f "$CLEAN_USER_FILE.tmp"
-
-echo -e "${GREEN}[+] Clean user dataset${NC}"
-echo -e "    → $CLEAN_USER_FILE"
+rm -f "$USERS.tmp"
 
 # ---------------------------------------------------------------------------
-# STEP 4: HASH STATISTICS
+# STEP 4: USERNAMES
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Calculating NTLM hash statistics...${NC}"
-
-TOTAL_HASHES=$(cut -d ':' -f4 "$CLEAN_USER_FILE" | wc -l)
-UNIQUE_HASHES=$(cut -d ':' -f4 "$CLEAN_USER_FILE" | sort -u | wc -l)
-
-echo -e "${GREEN}[+] Total NTLM hashes:${NC} $TOTAL_HASHES"
-echo -e "${GREEN}[+] Unique NTLM hashes:${NC} $UNIQUE_HASHES"
+cut -d: -f1 "$USERS" > "$USERNAMES"
 
 # ---------------------------------------------------------------------------
-# STEP 5: HASH EXTRACTION
+# STEP 5: HASHES
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Extracting NTLM hashes...${NC}"
-
-cut -d ':' -f4 "$CLEAN_USER_FILE" | sort -u > "$HASH_FILE"
-
-echo -e "${GREEN}[+] Deduplicated hash file${NC}"
-echo -e "    → $HASH_FILE"
+cut -d: -f4 "$USERS" | sort -u > "$HASHES"
 
 # ---------------------------------------------------------------------------
 # STEP 6: LM DETECTION
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Checking for LM hashes...${NC}"
-
-grep -v 'aad3b435b51404eeaad3b435b51404ee' "$CLEAN_USER_FILE" > "$LM_PRESENT_FILE" || true
-
-if [ -s "$LM_PRESENT_FILE" ]; then
-    LM_COUNT=$(wc -l < "$LM_PRESENT_FILE")
-    echo -e "${RED}[!] LM hashes detected:${NC} $LM_COUNT"
-    echo -e "    → $LM_PRESENT_FILE"
-else
-    rm -f "$LM_PRESENT_FILE"
-    echo -e "${GREEN}[+] No LM hashes detected${NC}"
-fi
+grep -v 'aad3b435b51404eeaad3b435b51404ee' "$USERS" > "$LM" || true
+[ ! -s "$LM" ] && rm -f "$LM"
 
 # ---------------------------------------------------------------------------
-# STEP 7: PRIVILEGED USERS (FILTERED)
+# STEP 7: PRIVILEGED USERS (adminCount)
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Extracting privileged accounts (BloodHound)...${NC}"
-
-jq -r '.data[]
-  | select(.Properties.admincount == true and .Properties.enabled == true)
-  | .Properties.samaccountname' "$BH_JSON" > "$ADMIN_USERS_FILE.tmp"
+jq -r '.data[] | select(.Properties.admincount==true and .Properties.enabled==true) | .Properties.samaccountname' "$BH_USERS" > "$ADMINS.tmp"
 
 if [ -n "$FILTER_PATTERN" ]; then
-    grep -vi "$FILTER_PATTERN" "$ADMIN_USERS_FILE.tmp" > "$ADMIN_USERS_FILE"
+    grep -vi "$FILTER_PATTERN" "$ADMINS.tmp" > "$ADMINS"
 else
-    mv "$ADMIN_USERS_FILE.tmp" "$ADMIN_USERS_FILE"
+    mv "$ADMINS.tmp" "$ADMINS"
 fi
+rm -f "$ADMINS.tmp"
 
-rm -f "$ADMIN_USERS_FILE.tmp"
-
-ADMIN_COUNT=$(wc -l < "$ADMIN_USERS_FILE")
-
-echo -e "${GREEN}[+] Enabled privileged accounts:${NC} $ADMIN_COUNT"
-echo -e "    → $ADMIN_USERS_FILE"
+# map privileged hashes
+grep -i -f "$ADMINS" "$USERS" > "$ADMIN_HASHES" || true
 
 # ---------------------------------------------------------------------------
-# STEP 8: MAP PRIVILEGED → HASHES
+# STEP 8: DOMAIN ADMINS (RID 512 via groups.json)
 # ---------------------------------------------------------------------------
-echo -e "\n${BLUE}[*] Mapping privileged users to hashes...${NC}"
+jq -r '.data[] | select(.ObjectIdentifier | endswith("-512")) | .Members[]?.ObjectIdentifier' "$BH_GROUPS" |
+jq -R -s 'split("\n")[:-1]' |
+jq -r --slurpfile sids /dev/stdin '.data[] | select(.ObjectIdentifier as $sid | $sids[0] | index($sid)) | .Properties.samaccountname' "$BH_USERS" |
+{ [ -n "$FILTER_PATTERN" ] && grep -vi "$FILTER_PATTERN" || cat; } > "$DA_USERS"
 
-grep -i -f "$ADMIN_USERS_FILE" "$CLEAN_USER_FILE" > "$ADMIN_HASHES_FILE" || true
-
-ADMIN_HASH_COUNT=$(wc -l < "$ADMIN_HASHES_FILE")
-
-echo -e "${GREEN}[+] Privileged hashes identified:${NC} $ADMIN_HASH_COUNT"
-echo -e "    → $ADMIN_HASHES_FILE"
+# map DA hashes
+grep -i -f "$DA_USERS" "$USERS" > "$DA_HASHES" || true
 
 # ---------------------------------------------------------------------------
 # STEP 9: POTFILE MAPPING
 # ---------------------------------------------------------------------------
 if [ -n "$POTFILE" ]; then
-    echo -e "\n${BLUE}[*] Mapping cracked hashes using potfile...${NC}"
-
-    awk -F':' '
-    NR==FNR {c[$1]=$2; next}
-    ($4 in c) {print $1 ":" c[$4]}
-    ' "$POTFILE" "$CLEAN_USER_FILE" > "$MAPPED_FILE"
-
-    MAPPED_COUNT=$(wc -l < "$MAPPED_FILE")
-
-    echo -e "${GREEN}[+] Cracked user credentials:${NC} $MAPPED_COUNT"
-    echo -e "    → $MAPPED_FILE"
+    awk -F: 'NR==FNR{c[$1]=$2;next} ($4 in c){print $1 ":" c[$4]}' "$POTFILE" "$USERS" > "$MAPPED"
 fi
 
 # ---------------------------------------------------------------------------
-# FINAL
+# DONE
 # ---------------------------------------------------------------------------
-echo -e "\n${GREEN}[✔] Hash Organiser completed successfully${NC}"
-echo -e "${GREEN}[+] Results stored in:${NC} $OUTPUT_DIR"
-echo ""
+echo "[+] Done"
+echo "[+] Output: $OUTPUT_DIR"

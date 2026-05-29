@@ -1,0 +1,26 @@
+
+{
+  "parameters": {
+    "sessionName": "PoC-session",
+    "hashDataset": "dataset_ntlm.txt",
+    "hashMode": "1000",
+    "flags": ["-O", "-w", "4", "-d", "1,3"]
+  },
+
+  "phases": [
+    {
+      "wordlist": "rockyou.txt"
+    },
+    {
+      "wordlist": "rockyou.txt",
+      "rule": "OneRuleToRuleThemStill.rule"
+    },
+    {
+      "wordlist": "hashmob.net_2026-05-24.medium.txt"
+    },
+    {
+      "wordlist": "hashmob.net_2026-05-24.medium.txt",
+      "rule": "OneRuleToRuleThemStill.rule"
+    }
+  ]
+}

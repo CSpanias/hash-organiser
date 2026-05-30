@@ -62,7 +62,7 @@ Everything must be first configured in the `config.json` file. An example config
 
 ### Estimate (no execution)
 
-The `--estimate` flag calculates the benchmark speed and then the effective speed based on an arbitrary number (benchmark speed divided by five). The number five was used solely based on the article's numbers as a PoC; the `Est. Time` column will 99% way off. 
+The `--estimate` flag calculates the benchmark speed and then the effective speed based on an arbitrary number (benchmark speed divided by five). The number five was used solely based on the article's numbers as a PoC, therefore, **expect the `Est. Time` column to be wildly off**. 
 
 ```powershell
 > python .\hashcat-phase-runner.py --config .\config.json --estimate

@@ -1,0 +1,26 @@
+
+{
+  "parameters": {
+    "sessionName": "PoC-session",
+    "hashDataset": "ntlm-hashes.txt",
+    "hashMode": "1000",
+    "flags": ["-O", "-w", "4", "-d", "1,3", "--potfile-path", ".\\poc-session.potfile"]
+  },
+
+  "phases": [
+    {
+      "wordlist": "rockyou.txt",
+	    "Password Strength":"Extremely weak"
+    },
+    {
+      "wordlist": "rockyou.txt",
+      "rule": "OneRuleToRuleThemStill.rule",
+	    "Password Strength":"Weak"
+    },
+    {
+      "wordlist": "weakpass_4a.txt",
+      "rule": "best66.rule",
+	    "Password Strength":"Medium"
+    }
+  ]
+}
